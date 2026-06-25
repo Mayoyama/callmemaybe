@@ -1,6 +1,7 @@
 from pydantic import BaseModel, Field, ValidationError
 from json import JSONDecodeError, load
 from typing import Any
+import sys
 
 class ParameterType(BaseModel):
     type: str = Field(min_length=1)
@@ -17,13 +18,22 @@ class PromptType(BaseModel):
 def parse_func_defs(filepath: str) -> list[FuncDef]:
     try:
         with open(filepath, "r") as file_obj:
-            data: Any = load(file_obj)
-    except ValidationError as e:
-        print(f"Validation error: {e}")
+            data: list[dict[str, Any]] = load(file_obj)
+    except (FileNotFoundError, PermissionError) as e:
+        print(f"File error: {e}")
+        sys.exit(1)
     except JSONDecodeError as e:
         print(f"JSON format error: {e}")
+        sys.exit(1)
+    results = []    
+    for item in data:
+    try:
+        f_def = FuncDef(**item)
+        results.append(f_def)
+    except ValidationError as e:
+        print(f"Validation error: {e}")
+        sys.exit(1)
 
-    param_type = ParameterType()
-    f_def = FuncDef()
-    for key, val in data:
-
+def parse_prompts(filepath: str) -> PromptType:
+    try:
+        with open(filepath "r") as prompt_file_obj:
