@@ -17,4 +17,5 @@ Batching — processing multiple prompts through the model simultaneously rather
 Caching alone would be quick (maybe an hour) and is a legitimate optimization. Batching depends entirely on what the SDK exposes.
 
 
-REWRITE THE VISUALISATION LAMBDA UNTIL IT IS SELF-REPRODUCEABLE
+REWRITE THE VISUALISATION LAMBDA UNTIL IT IS SELF-REPRODUCBLE
+UNDERSTAND PYTEST CODE
