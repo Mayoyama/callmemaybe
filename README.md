@@ -318,13 +318,36 @@ The 10 xfailed cases in this suite correspond directly to the known failure mode
 
 ### Support for Multiple LLM Models
 
-The model identifier is passed as a parameter to `SetupLLM`, defaulting to `Qwen/Qwen3-0.6B`. Any compatible HuggingFace model can be substituted by passing a different model string at instantiation.
+The `--model` flag allows any HuggingFace-compatible model to be substituted at runtime:
 
 ```bash
 uv run python -m src  # uses Qwen/Qwen3-0.6B by default
+uv run python -m src --model "Qwen/Qwen3-1.7B"
+uv run python -m src --model "HuggingFaceTB/SmolLM2-1.7B"
 ```
 
+Three models were tested against the same 50-prompt set (5 functions). Results below are function selection accuracy on the 26 prompts with a clearly correct answer:
+ 
+| Model | Family | Params | Function Selection |
+|---|---|---|---|
+| Qwen/Qwen3-0.6B | Qwen | 0.6B | 24/26 |
+| Qwen/Qwen3-1.7B | Qwen | 1.7B | 25/26 |
+| HuggingFaceTB/SmolLM2-1.7B | SmolLM | 1.7B | 17/26 |
+ 
+Within the Qwen family, the larger model marginally outperforms the smaller one. SmolLM2-1.7B — despite matching Qwen3-1.7B in parameter count — performs significantly worse, failing all 6 greet prompts by routing them to `fn_add_numbers`. This demonstrates that model family and instruction-following training alignment matter more than raw parameter count for this task.
+ 
+Note: `microsoft/Phi-3-mini-4k-instruct` was also tested but failed to load due to a `rope_scaling` incompatibility with the current version of `transformers`.
 <br/><a href="#table-of-contents">↑ Back to top</a>
+
+| Model | Family | Params | Passed | Failed | XFailed | Time |
+|---|---|---|---|---|---|---|
+| Qwen/Qwen3-0.6B | Qwen | 0.6B | 90 | 0 | 10 | 153s |
+| Qwen/Qwen3-1.7B | Qwen | 1.7B | 86 | 4 | 10 | 166s |
+| HuggingFaceTB/SmolLM2-1.7B | SmolLM | 1.7B | 47 | 43 | 10 | 96s |
+ 
+Qwen3-0.6B is the strongest performer despite being the smallest model. Qwen3-1.7B introduces 4 new failures not present in 0.6B — it over-interprets literal characters (`*` → `'star'`, `_` → `'x'`) and misroutes "Append" prompts, showing that more world knowledge can hurt on literal extraction tasks.
+ 
+SmolLM2-1.7B is the fastest (~40% faster than either Qwen model) but collapses to routing nearly everything to `fn_greet`, producing 43 failures. The speed gain is an artefact of early, low-effort token selection rather than genuine efficiency.
 
 ---
 
@@ -338,7 +361,15 @@ TODO — indicate whether `encode()` was replaced with a manual BPE implementati
 
 ### Advanced Error Recovery
 
-TODO
+Three failure modes are handled explicitly:
+
+**Loop limit exceeded** — `gen_func_name` and `gen_param_values` both have iteration caps. If the generation loop hits the limit without resolving a valid result, a warning is printed to stderr with the prompt and iteration count. The cap in `gen_func_name` is **dynamic** — set to the length of the longest valid function name rather than an arbitrary constant.
+
+**All tokens masked (`-inf` deadlock)** — if constrained decoding masks every token in the vocabulary, the model has no valid path forward. A dedicated guard detects this before calling `max()`, returning a safe fallback (`valid_names[0]` for function name, `'0'` for numeric parameters, `''` for string parameters) with a stderr warning.
+
+**Deadlock-induced infinite loop** — without the loop limit, a `-inf` deadlock would cause silent infinite looping: the garbage token selected when all logits are `-inf` would likely trigger the same masking on the next iteration, repeating forever. The loop limit acts as a defensive backstop that caps the damage even if the deadlock guard were somehow missed.
+
+All error messages follow the format `[function_name()]: description`, printed to `sys.stderr`.
 
 <br/><a href="#table-of-contents">↑ Back to top</a>
 
@@ -346,7 +377,9 @@ TODO
 
 ### Performance Optimizations
 
-TODO
+**Caching** — Caching — `get_logits_from_input_ids` is called once per token per generation step. Since the model is deterministic, calling it twice with the same token sequence returns identical logits. A dictionary cache (`self.cache: dict[tuple[int, ...], list[float]]`) stores results keyed by the full token sequence as a tuple. The cache is cleared at the start of each `gen_func_name` and `gen_param_values` call to prevent stale logits from bleeding across prompts. On the pytest suite (100 prompts), this reduced runtime from ~153s to ~146s — approximately a 5% reduction. The cached list is always copied before mutation to prevent corrupting stored results.
+
+A persistent cross-prompt cache (no clearing between calls) was also tested but provided no benefit — each prompt produces a unique token sequence from the first token, so the cache never hits across calls. A vocab pre-filtering optimisation was also attempted, using the set of characters appearing in valid function names to skip irrelevant tokens before the prefix check. This broke function selection because BPE tokens include the `Ġ` leading-space character, which is absent from function names but required for correct tokenisation. The pre-filter was removed.
 
 <br/><a href="#table-of-contents">↑ Back to top</a>
 

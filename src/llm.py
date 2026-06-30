@@ -16,13 +16,14 @@ class SetupLLM:
 
         Args:
             llm_model: HuggingFace model identifier to load.
-            verbose: a flag that will print logit operations to the screen 
+            verbose: a flag that will print logit operations to the screen
 
         Raises:
             SystemExit: If the vocab file cannot be opened or parsed.
         """
-        self.qwen_llm = Small_LLM_Model(llm_model)
-        self.vocab_path = self.qwen_llm.get_path_to_vocab_file()
+        self.llm_instance = Small_LLM_Model(llm_model)
+        self.vocab_path = self.llm_instance.get_path_to_vocab_file()
+        self.cache: dict[tuple[int, ...], list[float]] = {}
         self.verbose = verbose
         try:
             with open(self.vocab_path, encoding="utf-8") as file_obj:
@@ -89,12 +90,20 @@ class SetupLLM:
             + "\nBased on the user request above, "
             "the function that should be called is:"
         )
-        encoded = self.qwen_llm.encode(llm_prompt)
+        encoded = self.llm_instance.encode(llm_prompt)
         current_func_name = ""
         valid_names = [func.name for func in func_list]
         encoded_list = encoded[0].tolist()
-        while (current_func_name not in valid_names):
-            logits = self.qwen_llm.get_logits_from_input_ids(encoded_list)
+        max_len = max(len(name) for name in valid_names)
+        self.cache = {}
+        i = 0
+        while (current_func_name not in valid_names and i < max_len):
+            key = tuple(encoded_list)
+            if key not in self.cache:
+                self.cache[key] = list(
+                    self.llm_instance.get_logits_from_input_ids(encoded_list)
+                )
+            logits = list(self.cache[key])
             for token_string in self.vocab_dict.keys():
                 if any(
                     name.startswith(current_func_name + token_string)
@@ -104,12 +113,22 @@ class SetupLLM:
                 else:
                     token_id = self.vocab_dict[token_string]
                     logits[token_id] = float('-inf')
+            if max(logits) == float('-inf'):
+                print(f"[gen_func_name()]: all tokens masked - no valid "
+                      f"prefix exists. Defaulting to {valid_names[0]!r}",
+                      file=sys.stderr)
+                return valid_names[0]
             max_idx = logits.index(max(logits))
             target_str = self.decode_dict[max_idx]
             if self.verbose:
                 self._print_step("fn", current_func_name, logits, target_str)
             current_func_name += target_str
             encoded_list.append(max_idx)
+            i += 1
+        if current_func_name not in valid_names:
+            print(f"[gen_func_name()]: failed to resolve a valid function name "
+                  f"after {i} tokens for prompt {prompt!r}",
+                  file=sys.stderr)
         return current_func_name
 
     def gen_param_values(self, prompt: str, func_def: FuncDef, param_name: str,
@@ -143,14 +162,20 @@ class SetupLLM:
             f"{extracted_section}"
             f"{param_name}: \"")
 
-        encoded = self.qwen_llm.encode(llm_prompt)
+        encoded = self.llm_instance.encode(llm_prompt)
         encoded_list = encoded[0].tolist()
         current_value = ""
+        self.cache = {}
         if param_type in ("number", "float", "int", "integer"):
-            i = 0
             regex_pattern = re.compile(r"^-?\d*\.?\d*$")
-            while i <= 20:
-                logits = self.qwen_llm.get_logits_from_input_ids(encoded_list)
+            i = 0
+            while i <= 30:
+                key = tuple(encoded_list)
+                if key not in self.cache:
+                    self.cache[key] = list(
+                        self.llm_instance.get_logits_from_input_ids(encoded_list)
+                    )
+                logits = list(self.cache[key])
                 is_valid_number = any(char.isdigit() for char in current_value)
                 for token_string in self.vocab_dict.keys():
                     if token_string in ('}', ',', '"') and is_valid_number:
@@ -160,6 +185,10 @@ class SetupLLM:
                     else:
                         token_id = self.vocab_dict[token_string]
                         logits[token_id] = float('-inf')
+                if max(logits) == float('-inf'):
+                    print("[gen_param_values()]: all tokens masked - no valid "
+                          "prefix exists. Defaulting to '0'", file=sys.stderr)
+                    return '0'
                 max_idx = logits.index(max(logits))
                 target_str = self.decode_dict[max_idx]
                 if self.verbose:
@@ -169,13 +198,22 @@ class SetupLLM:
                 current_value += target_str
                 encoded_list.append(max_idx)
                 i += 1
+            if i > 30:
+                print(f"[gen_param_values()]: failed to resolve a valid "
+                      f"parameter value after {i} tokens for prompt {prompt!r}",
+                      file=sys.stderr)
         else:
             if not param_type == "string":
                 print(f"Unrecognised parameter type {param_type}: Attempting "
                       "to process as a string", file=sys.stderr)
             i = 0
             while i <= 50:
-                logits = self.qwen_llm.get_logits_from_input_ids(encoded_list)
+                key = tuple(encoded_list)
+                if key not in self.cache:
+                    self.cache[key] = list(
+                        self.llm_instance.get_logits_from_input_ids(encoded_list)
+                    )
+                logits = list(self.cache[key])
                 for token_string in self.vocab_dict.keys():
                     if (
                         ('"' in token_string and token_string != '"')
@@ -184,6 +222,10 @@ class SetupLLM:
                     ):
                         token_id = self.vocab_dict[token_string]
                         logits[token_id] = float('-inf')
+                if max(logits) == float('-inf'):
+                    print("[gen_param_values()]: all tokens masked - no valid "
+                          "prefix exists. Defaulting to ''", file=sys.stderr)
+                    return ''
                 max_idx = logits.index(max(logits))
                 target_str = self.decode_dict[max_idx]
                 if self.verbose:
@@ -193,4 +235,8 @@ class SetupLLM:
                 current_value += target_str
                 encoded_list.append(max_idx)
                 i += 1
+            if i > 50:
+                print(f"[gen_param_values()]: failed to resolve a valid "
+                      f"parameter value after {i} tokens for prompt {prompt!r}",
+                      file=sys.stderr)
         return current_value.lstrip('Ġ').replace('Ġ', ' ')

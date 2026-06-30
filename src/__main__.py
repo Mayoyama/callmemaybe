@@ -33,6 +33,8 @@ def main() -> None:
     parser.add_argument("--output", type=str,
                         default="data/output/function_calling_results.json",
                         required=False, help="Output filepath")
+    parser.add_argument("--model", type=str, default="Qwen/Qwen3-0.6B",
+                        required=False, help="Option to change LLM being used")
     parser.add_argument("--verbose", action="store_true",
                         default=False, help="Print generation steps")
     args = parser.parse_args()
@@ -46,7 +48,7 @@ def main() -> None:
     func_defs = parse_func_defs(args.functions_definition)
     prompt_defs = parse_prompts(args.input)
 
-    small_llm = SetupLLM("Qwen/Qwen3-0.6B", verbose=args.verbose)
+    small_llm = SetupLLM(args.model, verbose=args.verbose)
     results: list[dict[str, Any]] = []
     for p in prompt_defs:
         result_dict: dict[str, Any] = {}
