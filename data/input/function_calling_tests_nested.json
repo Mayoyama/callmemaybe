@@ -1,0 +1,17 @@
+[
+    {"prompt": "Generate the range starting at ten, ending at fifty"},
+    {"prompt": "Create a range from 20 to 70.5"},
+    {"prompt": "Create a range between 'freezing point of water' and 'boiling point of water'"},
+    {"prompt": "Create the fraction 3 over 4"},
+    {"prompt": "Create a fraction with numerator 1 and denominator 2"},
+    {"prompt": "Make the fraction 7 over 8"},
+    {"prompt": "Save Paris as the capital of France"},
+    {"prompt": "Store Tokyo as a location in Japan"},
+    {"prompt": "Save the location Brussels in Belgium"},
+	{"prompt": "Record the address of John Smith at 175 Oxford Street, Sydney, 2010"},
+	{"prompt": "Record the address of Alice Dupont at 750 Rue de la Paix, Paris, postcode 75001"},
+	{"prompt": "Record the address of Bob Johnson at 742 Evergreen Terrace, Springfield, zip: 62701"},
+	{"prompt": "Register Shannon Noll, aged 42, born in the month of June on the 11th, in 1984"},
+	{"prompt": "Register Timothy, 10, D.O.B: 20/11/2011"},
+	{"prompt": "Register Pikachu, YEAR:1996, Month:2, Day:27, 30 years old"}
+]

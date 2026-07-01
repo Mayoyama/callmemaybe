@@ -59,26 +59,63 @@ make install
 make run
 ```
 
-Or with custom file paths:
+#### List of additional (optional) flags:
 
 ```bash
 uv run python -m src \
-  --functions_definition data/input/functions_definition.json \
-  --input data/input/function_calling_tests.json \
-  --output data/output/function_calling_results.json
+  --functions_definition data/input/functions_definition.json \  # default: data/input/functions_definition.json
+  --input data/input/function_calling_tests.json \               # default: data/input/function_calling_tests.json
+  --output data/output/function_calling_results.json \           # default: data/output/function_calling_results.json
+  --model "Qwen/Qwen3-0.6B" \                                    # default: Qwen/Qwen3-0.6B
+  --bonus-encoder \                                              # use custom BPE tokenizer instead of SDK encoder
+  --verbose                                                      # print constrained decoding steps live
 ```
+#### Debug
+ 
+```bash
+make debug
+```
+ 
+Runs the program under Python's built-in debugger (`pdb`).
+ 
+#### Pytest
+ 
+```bash
+make pytest
+```
+ 
+Runs the full integration test suite (100 prompts, 21 functions).
+ 
+#### Run with 50-prompt set
+ 
+```bash
+make run-50
+```
+ 
+Runs the pipeline against the extended 50-prompt test set.
+
+#### Run with nested test set
+ 
+```bash
+make run-nested
+```
+
+Runs the pipeline against the nested function arguments test set.
 
 ### Verbose
 
 ```bash
 make verbose
 ```
+Prints the constrained decoding process live to the terminal for every generation step.
 
-Or equivalently:
-
+#### Bonus Encoder
+ 
 ```bash
-uv run python -m src --verbose
+make bonus-encoder
 ```
+
+Enables the custom BPE tokenizer instead of the SDK encoder. Not compatible with nested integer sub-fields.
 
 ### Lint
 
@@ -86,11 +123,15 @@ uv run python -m src --verbose
 make lint
 ```
 
+Runs flake8 and mypy with the required flags.
+
 ### Clean
 
 ```bash
 make clean
 ```
+
+Removes __pycache__, .mypy_cache, and compiled Python files.
 
 <br/><a href="#table-of-contents">↑ Back to top</a>
 
@@ -163,7 +204,7 @@ Each parameter is extracted with its own LLM call rather than extracting all par
 |---|---|---|---|---|---|
 | School (original) | 5 | 12 | 12/12 | 10/12 | 91.7% |
 | Extended (50 prompts) | 11 | 50 | 50/50 | 47/50 | 97% |
-| Pytest suite | 21 | 100 | 97/100 | 90/100 | 93.5% |
+| Pytest suite | 21 | 100 | 97/100 | 91/100 | 94% |
 
 I measured accuracy in terms of [number of prompts where the correct function was selected] plus [number of prompts where all parameter values were returned correctly] divided by [total number of prompts evaluated].
 
@@ -289,10 +330,10 @@ rootdir: C:\python\callmemaybe
 configfile: pyproject.toml
 plugins: anyio-4.14.0
 collected 100 items
+ 
+test_pipeline.py xxxxxxxxxX..........................................................................................
 
-test_pipeline.py .......xx............x......xx......................................x.......xx....xx................ 
-
-90 passed, 10 xfailed in 153.39s (0:02:33)
+90 passed, 9 xfailed, 1 xpassed in 153.39s (0:02:33)
 ```
 
 ### FAIL vs XFAIL
@@ -310,7 +351,9 @@ The 0.6B model has several documented limitations that cannot be addressed throu
 - Allows the suite to grow without known limitations polluting the pass rate
 - Provides a record of exactly which prompt patterns the model cannot handle reliably
 
-The 10 xfailed cases in this suite correspond directly to the known failure modes documented in the README performance analysis: direction-ambiguous function names, negative number extraction, regex synthesis, case transformation parameter isolation, and positional language inference.
+#### XFAIL cases in this suite
+
+9 of the 10 marked cases xfail'ed as expected. The remaining case — one of the "Prefix" pair — xpasses with the SDK encoder, demonstrating that tokenisation choices can influence which edge cases the model handles correctly.
 
 <br/><a href="#table-of-contents">↑ Back to top</a>
 
@@ -326,7 +369,25 @@ uv run python -m src --model "Qwen/Qwen3-1.7B"
 uv run python -m src --model "HuggingFaceTB/SmolLM2-1.7B"
 ```
 
-Three models were tested against the same 50-prompt set (5 functions). Results below are function selection accuracy on the 26 prompts with a clearly correct answer:
+
+
+#### Model Compatibility
+ 
+| Model | Status | Error | Notes |
+|---|---|---|---|
+| Qwen/Qwen3-0.6B | ✅ Working | — | Default model. 94% accuracy (SDK), 92% (custom encoder). |
+| Qwen/Qwen3-1.7B | ✅ Working | — | 86/100 passed. Introduces 4 new failures — over-interprets literal characters (`*` → `'asterisk'`) and misroutes "Append" prompts. |
+| HuggingFaceTB/SmolLM2-1.7B | ⚠️ Poor | — | 47/100 passed. Collapses to routing nearly all prompts to `fn_greet`. Speed gain is an artefact of low-effort token selection. |
+| HuggingFaceTB/SmolLM2-360M-Instruct | ⚠️ Poor | — | Routes almost everything to `fn_substitute_string_with_regex` regardless of prompt. Insufficient capacity to distinguish function descriptions. |
+| microsoft/Phi-3-mini-4k-instruct | ❌ Failed to load | `rope_scaling` incompatibility | Incompatible `rope_scaling` configuration with the current version of `transformers`. |
+| TinyLlama/TinyLlama-1.1B-Chat-v1.0 | ❌ Failed to load | `UnicodeDecodeError` | Uses SentencePiece vocab (`.model`) instead of JSON (`vocab.json`). Incompatible with the vocab loading logic. |
+| facebook/opt-125m | ❌ Failed to load | Vocab format error | OPT tokenizer format incompatible with the vocab loading logic. |
+| Qwen/Qwen2-0.5B | ❌ Failed at runtime | `KeyError: 151643` | Larger vocabulary than Qwen3-0.6B — token IDs outside the loaded decode dictionary. Requires rebuilding vocab handling for Qwen2's tokenizer. |
+
+
+#### Test Results
+
+Three models were tested against the same 50-prompt set (11 functions). Results below are function selection accuracy on the 26 prompts with a clearly correct answer:
  
 | Model | Family | Params | Function Selection |
 |---|---|---|---|
@@ -335,10 +396,8 @@ Three models were tested against the same 50-prompt set (5 functions). Results b
 | HuggingFaceTB/SmolLM2-1.7B | SmolLM | 1.7B | 17/26 |
  
 Within the Qwen family, the larger model marginally outperforms the smaller one. SmolLM2-1.7B — despite matching Qwen3-1.7B in parameter count — performs significantly worse, failing all 6 greet prompts by routing them to `fn_add_numbers`. This demonstrates that model family and instruction-following training alignment matter more than raw parameter count for this task.
- 
-Note: `microsoft/Phi-3-mini-4k-instruct` was also tested but failed to load due to a `rope_scaling` incompatibility with the current version of `transformers`.
-<br/><a href="#table-of-contents">↑ Back to top</a>
 
+With Pytest:
 | Model | Family | Params | Passed | Failed | XFailed | Time |
 |---|---|---|---|---|---|---|
 | Qwen/Qwen3-0.6B | Qwen | 0.6B | 90 | 0 | 10 | 153s |
@@ -349,11 +408,15 @@ Qwen3-0.6B is the strongest performer despite being the smallest model. Qwen3-1.
  
 SmolLM2-1.7B is the fastest (~40% faster than either Qwen model) but collapses to routing nearly everything to `fn_greet`, producing 43 failures. The speed gain is an artefact of early, low-effort token selection rather than genuine efficiency.
 
+<br/><a href="#table-of-contents">↑ Back to top</a>
+
 ---
 
 ### Recoding the Tokenizer
 
-TODO — indicate whether `encode()` was replaced with a manual BPE implementation using `get_path_to_vocab_file` and `get_logits_from_input_ids` only.
+The SDK's `encode()` method was replaced with a custom BPE implementation that uses only `get_path_to_vocab_file()` and `get_logits_from_input_ids()` — the two permitted SDK primitives. This means the full pipeline from raw text to constrained token generation runs without any reliance on the SDK's tokeniser internals. The custom encoder is enabled with the `--bonus-encoder` flag; the default encoder uses the SDK's `encode()` for comparison.
+ 
+See [Public Tokenizer Implementation](#public-tokenizer-implementation) for technical details and accuracy results.
 
 <br/><a href="#table-of-contents">↑ Back to top</a>
 
@@ -377,7 +440,7 @@ All error messages follow the format `[function_name()]: description`, printed t
 
 ### Performance Optimizations
 
-**Caching** — Caching — `get_logits_from_input_ids` is called once per token per generation step. Since the model is deterministic, calling it twice with the same token sequence returns identical logits. A dictionary cache (`self.cache: dict[tuple[int, ...], list[float]]`) stores results keyed by the full token sequence as a tuple. The cache is cleared at the start of each `gen_func_name` and `gen_param_values` call to prevent stale logits from bleeding across prompts. On the pytest suite (100 prompts), this reduced runtime from ~153s to ~146s — approximately a 5% reduction. The cached list is always copied before mutation to prevent corrupting stored results.
+**Caching** — `get_logits_from_input_ids` is called once per token per generation step. Since the model is deterministic, calling it twice with the same token sequence returns identical logits. A dictionary cache (`self.cache: dict[tuple[int, ...], list[float]]`) stores results keyed by the full token sequence as a tuple. The cache is cleared at the start of each `gen_func_name` and `gen_param_values` call to prevent stale logits from bleeding across prompts. On the pytest suite (100 prompts), this reduced runtime from ~153s to ~146s — approximately a 5% reduction. The cached list is always copied before mutation to prevent corrupting stored results.
 
 A persistent cross-prompt cache (no clearing between calls) was also tested but provided no benefit — each prompt produces a unique token sequence from the first token, so the cache never hits across calls. A vocab pre-filtering optimisation was also attempted, using the set of characters appearing in valid function names to skip irrelevant tokens before the prefix check. This broke function selection because BPE tokens include the `Ġ` leading-space character, which is absent from function names but required for correct tokenisation. The pre-filter was removed.
 
@@ -425,7 +488,43 @@ why it fails.
 
 ### Support for Complex Nested Function Arguments
 
-TODO
+A nested JSON object parameter is one where the value is itself a JSON object — a set of named sub-fields each with their own type, rather than a flat scalar like `"name": "Alice"`. For example, an `address` parameter might contain `city`, `postcode`, and `street` as separate typed fields inside a single object.
+
+To support this, `ParameterType` in `parser.py` was extended with an optional `properties` field (`dict[str, 'ParameterType'] | None`), using `model_rebuild()` to resolve the self-referential type annotation at class definition time. A standalone helper function `gen_object_param()` was added to `__main__.py`; it iterates over the sub-fields and calls `gen_param_values()` once per sub-field, applying the same type coercion logic (`number`, `float`, `int`, `integer`) as top-level parameters. In the main extraction loop, any parameter with `type == "object"` branches to `gen_object_param()` and skips the standard scalar extraction path via `continue`.
+
+**Note:** the bonus encoder (`--bonus-encoder`) is not compatible with nested integer sub-fields — use the default SDK encoder when running nested tests.
+
+#### Creating a Nested Object Test
+
+A nested function definition uses `"type": "object"` with a `"properties"` sub-object listing each field and its type:
+
+```json
+[
+  {
+    "name": "fn_example",
+    "description": "Description of what the function does.",
+    "parameters": {
+      "param_name": {
+        "type": "object",
+        "properties": {
+          "field_one": { "type": "string" },
+          "field_two": { "type": "integer" }
+        }
+      }
+    },
+    "returns": { "type": "object" }
+  }
+]
+```
+
+The corresponding prompts file is unchanged from the flat format:
+
+```json
+[
+  { "prompt": "Your natural language prompt here" }
+]
+```
+ 
 
 <br/><a href="#table-of-contents">↑ Back to top</a>
 
@@ -433,7 +532,28 @@ TODO
 
 ### Public Tokenizer Implementation
 
-TODO — indicate whether public `encode` and `decode` methods were implemented and how they integrate with the constrained decoding pipeline.
+Byte Pair Encoding (BPE) is a tokenisation algorithm that starts with individual characters and repeatedly merges the most frequently co-occurring pairs into a single token. This produces a vocabulary of subword units — common words become single tokens, while rare words get split into smaller recognisable pieces.
+
+A custom BPE encoder was implemented in `src/tokenizer.py` as an alternative to the `encode()` method provided by `llm_sdk`. It can be enabled with the `--bonus-encoder` flag and uses only `get_path_to_vocab_file()` and `get_logits_from_input_ids()` from the SDK.
+ 
+The encoder works in two steps. First, `raw_to_BPE()` converts the input string into BPE space by encoding it to UTF-8 bytes and mapping each byte through a `bytes_to_unicode()` table — the same 256-entry mapping used by all GPT-2-derived tokenisers. This correctly handles non-ASCII characters: the degree symbol `°` (U+00B0), for example, becomes two BPE characters `Â°` rather than a single incorrect lookup. Space and newline are handled automatically by the table (`0x20` → `Ġ`, `0x0A` → `Ċ`). Second, `encode()` performs a greedy longest-match scan over the BPE string, looking up each substring in the vocabulary dict and appending the corresponding token ID.
+ 
+The token IDs produced by `encode()` are passed directly to `get_logits_from_input_ids()` at each constrained decoding step, and each selected token ID is appended to the sequence before the next step — demonstrating the full encode → logits → constrained selection loop without any SDK tokeniser involvement.
+ 
+A public `decode()` method was not implemented because it was not needed: parameter values are reconstructed character by character during generation rather than by decoding a finished token sequence. The only post-processing required is stripping the leading BPE space character (`Ġ`) and replacing internal `Ġ` with spaces, which is handled inline.
+ 
+Using the pytest testing suite, the custom encoder passes 87/100 tests compared to 90/100 for the SDK encoder. The 3 remaining failures are model capability issues unrelated to tokenisation. An initial implementation that skipped the `bytes_to_unicode` step (replacing only space and newline) produced 86/100 — the missing case being prompts containing `°`, which was tokenised as the wrong token ID.
+
+#### Accuracy
+
+| Test set | Functions | Prompts | Function Selection | Parameter Extraction | Combined Accuracy |
+|---|---|---|---|---|---|
+|SDK encoder | 21 | 100 | 97/100 | 91/100 | 94% |
+|Custom encoder | 21 | 100 | 96/100 | 88/100 | 92% |
+
+An xpass (unexpected pass) is a test that was marked as an expected failure but passed anyway, signalling that the model performed better than anticipated. In this case, the two encoders xpass opposite prompts in the "Prefix" pair, demonstrating that tokenisation choices can measurably influence model behaviour even when the underlying prompt is identical.
+
+The pair in question is "Prefix 'bothered' with 'un'" and "Prefix 'un' with 'bothered'" — two prompts that are semantically equivalent but phrased differently, where the SDK encoder passes one and the custom encoder passes the other.
 
 <br/><a href="#table-of-contents">↑ Back to top</a>
 ___
@@ -444,6 +564,10 @@ ___
 - [TensorFlow Embedding Projector](https://projector.tensorflow.org/) 
 - [Constrained Decoding explained (YouTube)](https://www.youtube.com/watch?v=Yad5fknpk2U)
 - [Prompting and Prompt Engineering: A Comprehensive Guide](https://medium.com/@derrickryangiggs/prompting-and-prompt-engineering-a-comprehensive-guide-to-controlling-llm-behavior-9c8b417bd253)
+- [ASCII Table with All 256 Character codes in decimal, hexadecimal, octal and binary](https://www.sciencebuddies.org/science-fair-projects/references/ascii-table?__cf_chl_f_tk=Aw4II72VGTkWsg1br6e8whJ3zlWRs.B34QKmIaH3JtE-1782860051-1.0.1.1-zUHs16oMCyamzm.ZPiguMnNYjz.S3nlAU1.9PlUft3w)
+- [What is UTF-8](https://blog.hubspot.com/website/what-is-utf-8)
+- [What is Tokenization?](https://www.geeksforgeeks.org/nlp/what-is-tokenization/)
+- [Byte-Pair Encoding (BPE) in NLP](https://www.geeksforgeeks.org/nlp/byte-pair-encoding-bpe-in-nlp/)
 
 ### AI Usage
 
@@ -455,7 +579,8 @@ An AI assistant (Claude AI) was used as a reference and sounding board during de
 - Using it to evaluate output accuracy across prompt iterations — pasting results and asking what percentage were correct and why certain cases failed
 - Generating additional tests to confirm accuracy
 - Explaining what pytest is and how to create a simple practice test
-- Generating the skeleton and outline of the README
+- Generating the skeleton and outline of the README.md
+- Grammar, spelling and formatting inconsistencies in the README.md
 
 The core logic, prompt engineering iterations, and debugging were worked through independently.
 

@@ -3,22 +3,8 @@ import os
 import sys
 from src.parser import parse_func_defs, parse_prompts
 from src.llm import SetupLLM
+from src.utils import gen_output_file, recursive_gen_object_param
 from typing import Any
-from json import dump
-
-
-def gen_output_file(path: str, results: list[dict[str, Any]]) -> None:
-    """Write results to a JSON output file.
-
-    Args:
-        path: Destination file path.
-        results: List of result dictionaries to serialise.
-    """
-    try:
-        with open(path, "w") as file:
-            dump(results, file, indent=4)
-    except OSError as e:
-        print(f"Error - unable to save file: {e}", file=sys.stderr)
 
 
 def main() -> None:
@@ -37,6 +23,10 @@ def main() -> None:
                         required=False, help="Option to change LLM being used")
     parser.add_argument("--verbose", action="store_true",
                         default=False, help="Print generation steps")
+    parser.add_argument("--bonus-encoder", action="store_true",
+                        default=False,
+                        help="Use custom BPE tokenizer "
+                        "(encode/decode) instead of llm_sdk defaults")
     args = parser.parse_args()
 
     try:
@@ -48,7 +38,8 @@ def main() -> None:
     func_defs = parse_func_defs(args.functions_definition)
     prompt_defs = parse_prompts(args.input)
 
-    small_llm = SetupLLM(args.model, verbose=args.verbose)
+    small_llm = SetupLLM(args.model, verbose=args.verbose,
+                         bonus_encoder=args.bonus_encoder)
     results: list[dict[str, Any]] = []
     for p in prompt_defs:
         result_dict: dict[str, Any] = {}
@@ -60,6 +51,15 @@ def main() -> None:
             if func.name == res_func_name:
                 if func.parameters is not None:
                     for name, param in func.parameters.items():
+                        if param.type == 'object':
+                            props = param.properties
+                            if props is not None:
+                                params[name] = (
+                                    recursive_gen_object_param(p.prompt, func,
+                                                               props, params,
+                                                               small_llm))
+                            continue
+
                         raw = small_llm.gen_param_values(p.prompt, func, name,
                                                          param.type, params)
                         if (param.type not in ["number", "float",
@@ -68,7 +68,11 @@ def main() -> None:
                         else:
                             try:
                                 if param.type in ["number", "float"]:
-                                    params[name] = float(raw)
+                                    value = float(raw)
+                                    params[name] = (
+                                        int(value) if value.is_integer()
+                                        else value
+                                    )
                                 elif param.type in ["int", "integer"]:
                                     params[name] = int(float(raw))
                             except ValueError:

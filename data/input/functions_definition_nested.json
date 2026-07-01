@@ -1,0 +1,83 @@
+[
+    {
+        "name": "fn_create_range",
+        "description": "Create a numeric range. 'min' is the lower bound, 'max' is the upper bound.",
+        "parameters": {
+            "range": {
+                "type": "object",
+                "properties": {
+                    "min": {"type": "number"},
+                    "max": {"type": "number"}
+                }
+            }
+        },
+        "returns": {"type": "object"}
+    },
+    {
+        "name": "fn_create_fraction",
+        "description": "Create a fraction. 'numerator' is the top number, 'denominator' is the bottom number.",
+        "parameters": {
+            "fraction": {
+                "type": "object",
+                "properties": {
+                    "numerator": {"type": "number"},
+                    "denominator": {"type": "number"}
+                }
+            }
+        },
+        "returns": {"type": "object"}
+    },
+    {
+        "name": "fn_save_location",
+        "description": "Save a location of a city",
+        "parameters": {
+            "location": {
+                "type": "object",
+                "properties": {
+                    "city": {"type": "string"},
+                    "country": {"type": "string"}
+                }
+            }
+        },
+        "returns": {"type": "string"}
+    },
+    {
+        "name": "fn_new_register_user",
+        "description": "Register a new user's details (name, age and 'date of birth (DD/MM/YYYY)').",
+        "parameters": {
+            "user": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "age": {"type": "integer"},
+					"birthday": {
+						"type": "object",
+						"properties": {
+							"day" : {"type": "integer"},
+							"month": {"type": "integer"},
+							"year": {"type": "integer"}
+						}
+					}
+                }
+            }
+        },
+        "returns": {"type": "string"}
+    },
+    {
+        "name": "fn_record_address",
+        "description": "Record the address of a client with the client's full name and their address (house number, street name, city and postcode).",
+        "parameters": {
+            "address": {
+                "type": "object",
+                "properties": {
+                    "client_name": {"type": "string"},
+                    "house_number": {"type": "integer"},
+                    "street_name": {"type": "string"},
+					"city": {"type": "string"},
+                    "postcode": {"type": "integer"}
+                }
+            }
+        },
+        "returns": {"type": "string"}
+    }
+]

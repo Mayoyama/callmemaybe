@@ -2,6 +2,8 @@ from llm_sdk import Small_LLM_Model  # type: ignore
 from json import load, JSONDecodeError
 from typing import Any
 from src.parser import FuncDef
+from src.tokenizer import encode
+from src.utils import print_step
 import sys
 import re
 
@@ -11,20 +13,28 @@ class SetupLLM:
     Qwen3-0.6B.
     """
     def __init__(self, llm_model: str = "Qwen/Qwen3-0.6B",
-                 verbose: bool = False) -> None:
+                 verbose: bool = False,
+                 bonus_encoder: bool = False) -> None:
         """Initialise the LLM and load the BPE vocabulary.
 
         Args:
             llm_model: HuggingFace model identifier to load.
             verbose: a flag that will print logit operations to the screen
+            bonus_encoder: If True, use custom BPE encoder instead of llm_sdk
+                encode().
 
         Raises:
             SystemExit: If the vocab file cannot be opened or parsed.
         """
-        self.llm_instance = Small_LLM_Model(llm_model)
+        try:
+            self.llm_instance = Small_LLM_Model(llm_model, device="cpu")
+        except Exception as e:
+            print(f"Failed to load model {llm_model!r}: {e}", file=sys.stderr)
+            sys.exit(1)
         self.vocab_path = self.llm_instance.get_path_to_vocab_file()
         self.cache: dict[tuple[int, ...], list[float]] = {}
         self.verbose = verbose
+        self.bonus_encoder = bonus_encoder
         try:
             with open(self.vocab_path, encoding="utf-8") as file_obj:
                 self.vocab_dict = load(file_obj)
@@ -39,23 +49,23 @@ class SetupLLM:
             for token_string, token_id in self.vocab_dict.items()
         }
 
-    def _print_step(self, label: str, current: str, logits: list[float],
-                    selected: str) -> None:
-        """Print the top 3 token candidates and selected token for a decoding step.
+    # def _print_step(self, label: str, current: str, logits: list[float],
+    #                 selected: str) -> None:
+    #     """Print top 3 token candidates and selected token for decoding step.
 
-        Args:
-            label: Prefix label (function name or parameter name).
-            current: The string built so far in this generation pass.
-            logits: Full logit list from the model.
-            selected: The token that was selected.
-        """
-        top = sorted(
-            ((i, s) for i, s in enumerate(logits) if i in self.decode_dict),
-            key=lambda x: x[1],
-            reverse=True
-        )[:3]
-        top_tokens = [(self.decode_dict[i], round(s, 4)) for i, s in top]
-        print(f"  {label} [{current!r}] top: {top_tokens} → {selected!r}")
+    #     Args:
+    #         label: Prefix label (function name or parameter name).
+    #         current: The string built so far in this generation pass.
+    #         logits: Full logit list from the model.
+    #         selected: The token that was selected.
+    #     """
+    #     top = sorted(
+    #         ((i, s) for i, s in enumerate(logits) if i in self.decode_dict),
+    #         key=lambda x: x[1],
+    #         reverse=True
+    #     )[:3]
+    #     top_tokens = [(self.decode_dict[i], round(s, 4)) for i, s in top]
+    #     print(f"  {label} [{current!r}] top: {top_tokens} → {selected!r}")
 
     def gen_func_name(self, prompt: str, func_list: list[FuncDef]) -> str:
         """Select the best-matching function name for a user prompt.
@@ -70,6 +80,10 @@ class SetupLLM:
         Returns:
             The name of the selected function.
         """
+        if not func_list:
+            print("[gen_func_name()]: Empty function list. Exiting",
+                  file=sys.stderr)
+            sys.exit(1)
         func_lines = []
         for func in func_list:
             if func.parameters is None:
@@ -90,10 +104,14 @@ class SetupLLM:
             + "\nBased on the user request above, "
             "the function that should be called is:"
         )
-        encoded = self.llm_instance.encode(llm_prompt)
+        if self.bonus_encoder:
+            encoded_list = encode(llm_prompt, self.vocab_dict)
+        else:
+            encoded = self.llm_instance.encode(llm_prompt)
+            encoded_list = encoded[0].tolist()
         current_func_name = ""
         valid_names = [func.name for func in func_list]
-        encoded_list = encoded[0].tolist()
+
         max_len = max(len(name) for name in valid_names)
         self.cache = {}
         i = 0
@@ -121,13 +139,14 @@ class SetupLLM:
             max_idx = logits.index(max(logits))
             target_str = self.decode_dict[max_idx]
             if self.verbose:
-                self._print_step("fn", current_func_name, logits, target_str)
+                print_step("fn", current_func_name, logits,
+                           target_str, self.decode_dict)
             current_func_name += target_str
             encoded_list.append(max_idx)
             i += 1
         if current_func_name not in valid_names:
-            print(f"[gen_func_name()]: failed to resolve a valid function name "
-                  f"after {i} tokens for prompt {prompt!r}",
+            print(f"[gen_func_name()]: failed to resolve a valid function "
+                  f"name after {i} tokens for prompt {prompt!r}",
                   file=sys.stderr)
         return current_func_name
 
@@ -161,9 +180,11 @@ class SetupLLM:
             f"from the Request.\n"
             f"{extracted_section}"
             f"{param_name}: \"")
-
-        encoded = self.llm_instance.encode(llm_prompt)
-        encoded_list = encoded[0].tolist()
+        if self.bonus_encoder:
+            encoded_list = encode(llm_prompt, self.vocab_dict)
+        else:
+            encoded = self.llm_instance.encode(llm_prompt)
+            encoded_list = encoded[0].tolist()
         current_value = ""
         self.cache = {}
         if param_type in ("number", "float", "int", "integer"):
@@ -173,7 +194,8 @@ class SetupLLM:
                 key = tuple(encoded_list)
                 if key not in self.cache:
                     self.cache[key] = list(
-                        self.llm_instance.get_logits_from_input_ids(encoded_list)
+                        self.llm_instance.get_logits_from_input_ids(
+                            encoded_list)
                     )
                 logits = list(self.cache[key])
                 is_valid_number = any(char.isdigit() for char in current_value)
@@ -192,7 +214,8 @@ class SetupLLM:
                 max_idx = logits.index(max(logits))
                 target_str = self.decode_dict[max_idx]
                 if self.verbose:
-                    self._print_step(param_name, current_value, logits, target_str)
+                    print_step(param_name, current_value, logits,
+                               target_str, self.decode_dict)
                 if target_str in ('}', ',', '"'):
                     break
                 current_value += target_str
@@ -200,8 +223,8 @@ class SetupLLM:
                 i += 1
             if i > 30:
                 print(f"[gen_param_values()]: failed to resolve a valid "
-                      f"parameter value after {i} tokens for prompt {prompt!r}",
-                      file=sys.stderr)
+                      f"parameter value after {i - 1} tokens for "
+                      f"prompt {prompt!r}", file=sys.stderr)
         else:
             if not param_type == "string":
                 print(f"Unrecognised parameter type {param_type}: Attempting "
@@ -211,7 +234,8 @@ class SetupLLM:
                 key = tuple(encoded_list)
                 if key not in self.cache:
                     self.cache[key] = list(
-                        self.llm_instance.get_logits_from_input_ids(encoded_list)
+                        self.llm_instance.get_logits_from_input_ids(
+                            encoded_list)
                     )
                 logits = list(self.cache[key])
                 for token_string in self.vocab_dict.keys():
@@ -229,7 +253,8 @@ class SetupLLM:
                 max_idx = logits.index(max(logits))
                 target_str = self.decode_dict[max_idx]
                 if self.verbose:
-                    self._print_step(param_name, current_value, logits, target_str)
+                    print_step(param_name, current_value, logits,
+                               target_str, self.decode_dict)
                 if target_str == '"':
                     break
                 current_value += target_str
@@ -237,6 +262,7 @@ class SetupLLM:
                 i += 1
             if i > 50:
                 print(f"[gen_param_values()]: failed to resolve a valid "
-                      f"parameter value after {i} tokens for prompt {prompt!r}",
+                      f"parameter value after {i - 1} tokens for "
+                      f"prompt {prompt!r}",
                       file=sys.stderr)
         return current_value.lstrip('Ġ').replace('Ġ', ' ')

@@ -7,6 +7,10 @@ import sys
 class ParameterType(BaseModel):
     """Pydantic model representing a typed function parameter."""
     type: str = Field(min_length=1)
+    properties: dict[str, 'ParameterType'] | None = Field(default=None)
+
+
+ParameterType.model_rebuild()
 
 
 class FuncDef(BaseModel):

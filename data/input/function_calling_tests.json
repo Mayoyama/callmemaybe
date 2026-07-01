@@ -3,7 +3,7 @@
     "prompt": "What is the sum of 2.5 and 3?"
   },
   {
-    "prompt": "What is the sum of 2 and 2?"
+    "prompt": "What is the sum of 2 and 2147483674?"
   },
   {
     "prompt": "What is the sum of 265 and 345?"
@@ -15,16 +15,25 @@
     "prompt": "Greet john"
   },
   {
+    "prompt": "Greet samantha"
+  },
+  {
     "prompt": "Reverse the string 'hello'"
   },
   {
-    "prompt": "Reverse the string 'world'"
+    "prompt": "Reverse the word 'world'"
+  },
+  {
+    "prompt": "Reverse the sentence 'We are the champions'"
   },
   {
     "prompt": "What is the square root of 16?"
   },
   {
     "prompt": "Calculate the square root of 144"
+  },
+  {
+    "prompt": "square root of 144 is?"
   },
   {
     "prompt": "Replace all numbers in \"Hello 34 I'm 233 years old\" with NUMBERS"
